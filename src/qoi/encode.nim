@@ -85,7 +85,27 @@ proc encode*(pixels: ptr uint8; desc: var QoiDesc; outLen: var int): seq[uint8] 
       else:
         index[indexPos] = px
         if px[A] == pxPrev[A]:
-          discard # XXX
+          let
+            vr = px[R].int - pxPrev[R].int
+            vg = px[G].int - pxPrev[G].int
+            vb = px[B].int - pxPrev[B].int
+            vgR = vr - vg
+            vgB = vb - vg
+          if vr > -3 and vr < 2 and vg > -3 and vg < 2 and vb > -3 and vb < 2:
+            result.write8(p,
+              OpDiff or
+              ((vr + 2) shl 4).uint8 or
+              ((vg + 2) shl 2).uint8 or
+              (vb + 2).uint8
+            )
+          elif vgR > -9 and vgR < 8 and vg > -33 and vg < 32 and vgB > -9 and vgB < 8:
+            result.write8(p, OpLuma or (vg + 32).uint8)
+            result.write8(p, (vgR + 8 shl 4).uint8 or (vgB + 8).uint8)
+          else:
+            result.write8(p, OpRgb)
+            result.write8(p, px[R])
+            result.write8(p, px[G])
+            result.write8(p, px[B])
         else:
           result.write8(p, OpRgba)
           result.write8(p, px[R])

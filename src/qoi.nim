@@ -5,6 +5,8 @@
 
 import qoi/types
 import qoi/decode
+import qoi/encode
 
 export types
 export decode
+export encode

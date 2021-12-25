@@ -23,33 +23,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import ./privateTypes
+import ./private/common
 import ./types
-
-const
-  HeaderSize = 14
-  Padding = ['\0', '\0', '\0', '\0', '\0', '\0', '\0', '\1']
-  Magic = ('q'.uint32 shl 24) or ('o'.uint32 shl 16) or ('i'.uint32 shl 8) or 'f'.uint32
-  PixelsMax = 400000000.uint32
-  OpIndex = 0x00 # 00xxxxxx
-  OpDiff = 0x40  # 01xxxxxx
-  OpLuma = 0x80  # 10xxxxxx
-  OpRun = 0xc0   # 11xxxxxx
-  OpRgb = 0xfe   # 11111110
-  OpRgba = 0xff  # 11111111
-  Mask2 = 0xc0   # 11000000
-
-func postInc[T](x: var T; d: T = 1): T =
-  let tmp = x
-  x += d
-  tmp
-
-func `+@`[T](p: ptr T; offset: int): ptr T =
-  cast[ptr T](cast[ByteAddress](p) + offset * sizeof(T))
-
-func `[]`[T](base: ptr T; idx: int): T =
-  let p = base +@ idx
-  p[]
 
 func read32(bytes: ptr uint8; p: var int): uint32 =
   let
@@ -62,14 +37,11 @@ func read32(bytes: ptr uint8; p: var int): uint32 =
 template read8(bytes: ptr uint8; p: var int): uint8 =
   bytes[postInc p]
 
-template colorHash(c: Rgba): uint8 =
-  c[R] * 3 + c[G] * 5 + c[B] * 7 + c[A] * 11
-
 proc decode*(bytes: ptr uint8; size: int; desc: var QoiDesc; channels = 0): seq[uint8] =
   var
     channels = channels.uint
     index: array[64, Rgba]
-    px: Rgba
+    px = InitialPixel
     p = 0
     run = 0'u32
 
@@ -94,8 +66,6 @@ proc decode*(bytes: ptr uint8; size: int; desc: var QoiDesc; channels = 0): seq[
 
   let pxLen = desc.width * desc.height * channels
   result = newSeq[uint8](pxLen)
-
-  px = [0'u8, 0'u8, 0'u8, 255'u8]
 
   let chunksLen = size - sizeof(Padding)
   for pxPos in countUp(0'u, pxLen - 1, channels):

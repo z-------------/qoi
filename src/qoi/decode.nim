@@ -4,7 +4,6 @@
 # https://opensource.org/licenses/MIT
 
 import ./private/common
-import ./types
 import std/deques
 
 func read32(bytes: Deque[uint8]; p: var int): uint32 =
@@ -40,7 +39,7 @@ func initDecode*(channels = 0): QoiDecodeContext =
   result.channels = channels.uint8
 
 func processHeader(ctx: var QoiDecodeContext) =
-  ## Process a complete read header
+  ## Process a completely read header
   var p = 0
   let headerMagic = ctx.buf.read32(p)
   ctx.width = ctx.buf.read32(p)
@@ -53,19 +52,19 @@ func processHeader(ctx: var QoiDecodeContext) =
     raise newException(ValueError, "invalid header")
   ctx.hasHeader = true
 
-func processChunk(ctx: var QoiDecodeContext; callback: UpdateCallback) =
+func processChunk[T: Deque[uint8] or openArray[uint8]](ctx: var QoiDecodeContext; buf: T; callback: UpdateCallback) =
   ## Process a completely read chunk
   var p = 0
-  let b1 = ctx.buf[0]
+  let b1 = buf[0]
   if b1 == OpRgb:
-    ctx.px[R] = ctx.buf.read8(p)
-    ctx.px[G] = ctx.buf.read8(p)
-    ctx.px[B] = ctx.buf.read8(p)
+    ctx.px[R] = buf.read8(p)
+    ctx.px[G] = buf.read8(p)
+    ctx.px[B] = buf.read8(p)
   elif b1 == OpRgba:
-    ctx.px[R] = ctx.buf.read8(p)
-    ctx.px[G] = ctx.buf.read8(p)
-    ctx.px[B] = ctx.buf.read8(p)
-    ctx.px[A] = ctx.buf.read8(p)
+    ctx.px[R] = buf.read8(p)
+    ctx.px[G] = buf.read8(p)
+    ctx.px[B] = buf.read8(p)
+    ctx.px[A] = buf.read8(p)
   elif (b1 and Mask2) == OpIndex:
     ctx.px = ctx.index[b1]
   elif (b1 and Mask2) == OpDiff:
@@ -74,7 +73,7 @@ func processChunk(ctx: var QoiDecodeContext; callback: UpdateCallback) =
     ctx.px[B] += ((b1 shr 0) and 0x03) - 2
   elif (b1 and Mask2) == OpLuma:
     let
-      b2 = ctx.buf.read8(p)
+      b2 = buf.read8(p)
       vg = (b1 and 0x3f) - 32
     ctx.px[R] += vg - 8 + ((b2 shr 4) and 0x0f)
     ctx.px[G] += vg
@@ -88,8 +87,27 @@ template addLast[T](d: Deque[T]; items: openArray[T]) =
   for item in items:
     d.addLast(item)
 
+func bytesNeeded(ctx: QoiDecodeContext): int =
+  ## How many bytes are needed in order to complete the current chunk
+  # XXX todo
+
+func chunkSize(chunkFirstByte: uint8): int =
+  ## The size of the chunk whose first byte is chunkFirstByte
+  # XXX todo
+
 func update*(ctx: var QoiDecodeContext; data: openArray[uint8]; callback: UpdateCallback) =
   if not ctx.hasHeader:
     ctx.buf.addLast(data)
     if ctx.buf.len >= HeaderSize:
       ctx.processHeader()
+  else:
+    var pos = 0
+    if ctx.buf.len != 0:
+      # finish the current incomplete chunk
+      let bytesNeeded = ctx.bytesNeeded
+      ctx.buf.addLast(data.toOpenArray(0, bytesNeeded - 1))
+      pos += bytesNeeded
+      ctx.processChunk(ctx.buf, callback)
+    var size: int
+    while data.len - pos >= 1 and (size = chunkSize(data[pos]); data.len - pos >= size):
+      discard # XXX

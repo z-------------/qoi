@@ -100,10 +100,6 @@ func chunkSize(b1: uint8): int =
   else:
     raise newException(ValueError, "invalid chunk")
 
-func bytesNeeded(ctx: QoiDecodeContext): int =
-  ## How many bytes are needed in order to complete the current chunk
-  chunkSize(ctx.buf[0]) - ctx.buf.len
-
 func update*(ctx: var QoiDecodeContext; data: openArray[uint8]; callback: UpdateCallback) =
   if not ctx.hasHeader:
     ctx.buf.addLast(data)
@@ -111,12 +107,19 @@ func update*(ctx: var QoiDecodeContext; data: openArray[uint8]; callback: Update
       ctx.processHeader()
   else:
     var pos = 0
+    # finish the current incomplete chunk
     if ctx.buf.len != 0:
-      # finish the current incomplete chunk
-      let bytesNeeded = ctx.bytesNeeded
-      ctx.buf.addLast(data.toOpenArray(0, bytesNeeded - 1))
-      pos += bytesNeeded
-      ctx.processChunk(ctx.buf, callback)
+      let
+        bytesNeeded = chunkSize(ctx.buf[0]) - ctx.buf.len
+        bytesToAdd = min(bytesNeeded, data.len)
+      ctx.buf.addLast(data.toOpenArray(0, bytesToAdd - 1))
+      pos += bytesToAdd
+      if bytesToAdd >= bytesNeeded:
+        ctx.processChunk(ctx.buf, callback)
+        ctx.buf.clear()
+    # read complete chunks
     var size: int
     while data.len - pos >= 1 and (size = chunkSize(data[pos]); data.len - pos >= size):
       discard # XXX
+    # buffer trailing incomplete chunk
+    # XXX

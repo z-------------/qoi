@@ -87,13 +87,22 @@ template addLast[T](d: Deque[T]; items: openArray[T]) =
   for item in items:
     d.addLast(item)
 
+func chunkSize(b1: uint8): int =
+  ## The size of the chunk with the given first byte
+  if b1 == OpRgb:
+    4
+  elif b1 == OpRgba:
+    5
+  elif (b1 and Mask2) in {OpIndex, OpDiff, OpRun}:
+    1
+  elif (b1 and Mask2) == OpLuma:
+    2
+  else:
+    raise newException(ValueError, "invalid chunk")
+
 func bytesNeeded(ctx: QoiDecodeContext): int =
   ## How many bytes are needed in order to complete the current chunk
-  # XXX todo
-
-func chunkSize(chunkFirstByte: uint8): int =
-  ## The size of the chunk whose first byte is chunkFirstByte
-  # XXX todo
+  chunkSize(ctx.buf[0]) - ctx.buf.len
 
 func update*(ctx: var QoiDecodeContext; data: openArray[uint8]; callback: UpdateCallback) =
   if not ctx.hasHeader:

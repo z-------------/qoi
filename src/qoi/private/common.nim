@@ -14,6 +14,7 @@ const
 
 const
   HeaderSize* = 14
+  IndexSize* = 64
   Padding* = [0'u8, 0'u8, 0'u8, 0'u8, 0'u8, 0'u8, 0'u8, 1'u8]
   Magic* = ('q'.uint32 shl 24) or ('o'.uint32 shl 16) or ('i'.uint32 shl 8) or 'f'.uint32
   PixelsMax* = 400000000.uint32

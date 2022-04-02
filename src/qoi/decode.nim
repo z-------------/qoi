@@ -135,4 +135,5 @@ func update*(ctx: var QoiDecodeContext; data: openArray[uint8]; callback: Update
       ctx.processChunk(data.toOpenArray(pos, pos + size - 1), callback)
       pos += size
     # buffer trailing incomplete chunk
-    # XXX
+    if pos < data.len:
+      ctx.buf.addLast(data.toOpenArray(pos, data.high))

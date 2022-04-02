@@ -6,7 +6,10 @@
 import ./private/common
 import std/deques
 
-func read32(bytes: Deque[uint8]; p: var int): uint32 =
+type
+  Buf = Deque[uint8] or openArray[uint8]
+
+func read32(bytes: Buf; p: var int): uint32 =
   let
     a = bytes[postInc p].uint32
     b = bytes[postInc p].uint32
@@ -14,7 +17,7 @@ func read32(bytes: Deque[uint8]; p: var int): uint32 =
     d = bytes[postInc p].uint32
   a shl 24 or b shl 16 or c shl 8 or d
 
-template read8(bytes: Deque[uint8]; p: var int): uint8 =
+template read8(bytes: Buf; p: var int): uint8 =
   bytes[postInc p]
 
 type
@@ -27,15 +30,11 @@ type
     hasHeader: bool
 
     buf: Deque[uint8]
-
-    px: Rgba
-    run: uint32
     index: array[IndexSize, Rgba]
   UpdateCallback* = (proc (pixels: openArray[uint8]))
 
 func initDecode*(channels = 0): QoiDecodeContext =
   result.buf = initDeque[uint8](HeaderSize)
-  result.px = InitialPixel
   result.channels = channels.uint8
 
 func processHeader(ctx: var QoiDecodeContext) =
@@ -52,36 +51,45 @@ func processHeader(ctx: var QoiDecodeContext) =
     raise newException(ValueError, "invalid header")
   ctx.hasHeader = true
 
-func processChunk[T: Deque[uint8] or openArray[uint8]](ctx: var QoiDecodeContext; buf: T; callback: UpdateCallback) =
+func processChunk(ctx: var QoiDecodeContext; buf: Buf; callback: UpdateCallback) =
   ## Process a completely read chunk
-  var p = 0
+  var
+    pos = 0
+    count = 1
+    pixel = InitialPixel
   let b1 = buf[0]
   if b1 == OpRgb:
-    ctx.px[R] = buf.read8(p)
-    ctx.px[G] = buf.read8(p)
-    ctx.px[B] = buf.read8(p)
+    pixel[R] = buf.read8(pos)
+    pixel[G] = buf.read8(pos)
+    pixel[B] = buf.read8(pos)
   elif b1 == OpRgba:
-    ctx.px[R] = buf.read8(p)
-    ctx.px[G] = buf.read8(p)
-    ctx.px[B] = buf.read8(p)
-    ctx.px[A] = buf.read8(p)
+    pixel[R] = buf.read8(pos)
+    pixel[G] = buf.read8(pos)
+    pixel[B] = buf.read8(pos)
+    pixel[A] = buf.read8(pos)
   elif (b1 and Mask2) == OpIndex:
-    ctx.px = ctx.index[b1]
+    pixel = ctx.index[b1]
   elif (b1 and Mask2) == OpDiff:
-    ctx.px[R] += ((b1 shr 4) and 0x03) - 2
-    ctx.px[G] += ((b1 shr 2) and 0x03) - 2
-    ctx.px[B] += ((b1 shr 0) and 0x03) - 2
+    pixel[R] += ((b1 shr 4) and 0x03) - 2
+    pixel[G] += ((b1 shr 2) and 0x03) - 2
+    pixel[B] += ((b1 shr 0) and 0x03) - 2
   elif (b1 and Mask2) == OpLuma:
     let
-      b2 = buf.read8(p)
+      b2 = buf.read8(pos)
       vg = (b1 and 0x3f) - 32
-    ctx.px[R] += vg - 8 + ((b2 shr 4) and 0x0f)
-    ctx.px[G] += vg
-    ctx.px[B] += vg - 8 + ((b2 shr 0) and 0x0f)
+    pixel[R] += vg - 8 + ((b2 shr 4) and 0x0f)
+    pixel[G] += vg
+    pixel[B] += vg - 8 + ((b2 shr 0) and 0x0f)
   elif (b1 and Mask2) == OpRun:
-    ctx.run = b1 and 0x3f
+    count += (b1 and 0x3f).int
   else:
     raise newException(ValueError, "invalid chunk")
+  ctx.index[colorHash(pixel) mod 64] = pixel
+  for _ in 0..<count:
+    if ctx.channels == 4:
+      callback(pixel[R..B])
+    else:
+      callback(pixel)
 
 template addLast[T](d: Deque[T]; items: openArray[T]) =
   for item in items:
@@ -120,6 +128,7 @@ func update*(ctx: var QoiDecodeContext; data: openArray[uint8]; callback: Update
     # read complete chunks
     var size: int
     while data.len - pos >= 1 and (size = chunkSize(data[pos]); data.len - pos >= size):
-      discard # XXX
+      ctx.processChunk(data.toOpenArray(pos, pos + size - 1), callback)
+      pos += size
     # buffer trailing incomplete chunk
     # XXX

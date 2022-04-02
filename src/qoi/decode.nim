@@ -87,9 +87,9 @@ func processChunk(ctx: var QoiDecodeContext; buf: Buf; callback: UpdateCallback)
   ctx.index[colorHash(pixel) mod 64] = pixel
   for _ in 0..<count:
     if ctx.channels == 4:
-      callback(pixel[R..B])
-    else:
       callback(pixel)
+    else:
+      callback(pixel[R..B])
 
 template addLast[T](d: Deque[T]; items: openArray[T]) =
   for item in items:

@@ -47,7 +47,11 @@ func processHeader(ctx: var QoiDecodeContext) =
   if ctx.channels == 0:
     ctx.channels = channels
   ctx.colorspace = ctx.buf.read8(p)
-  if ctx.width == 0 or ctx.height == 0 or ctx.channels < 3 or ctx.channels > 4 or ctx.colorspace > 1 or headerMagic != Magic or ctx.height >= PixelsMax div ctx.width:
+  if headerMagic != Magic or
+      0 in {ctx.width, ctx.height} or
+      ctx.channels notin {3, 4} or
+      ctx.colorspace > 1 or
+      ctx.height >= PixelsMax div ctx.width:
     raise newException(ValueError, "invalid header")
   ctx.hasHeader = true
 

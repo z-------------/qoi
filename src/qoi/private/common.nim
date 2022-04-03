@@ -32,6 +32,10 @@ func postInc*[T](x: var T; d: T = 1): T =
   x += d
   tmp
 
+template preInc*[T](x: var T; d: T = 1): T =
+  x += d
+  x
+
 func `+@`*[T; I: SomeInteger](p: ptr T; offset: I): ptr T =
   cast[ptr T](cast[ByteAddress](p) + ByteAddress(offset) * sizeof(T))
 

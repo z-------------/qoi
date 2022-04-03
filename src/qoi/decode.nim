@@ -6,6 +6,9 @@
 import ./private/common
 import std/deques
 
+const
+  QoiCapacityFactor {.intdefine.} = 4 # Somewhat arbitrarily chosen. Each chunk consists of between 1 and 5 bytes. Most chunks produce 1 pixel each, except for runs which can produce up to 64 pixels. Each pixel consists of 3 or 4 bytes. If we ignore runs, the worst case is that each chunk is 1 byte and produces 4 bytes.
+
 type
   Buf = Deque[uint8] or openArray[uint8]
 
@@ -27,15 +30,16 @@ type
     channels*: uint8
     colorspace*: uint8
 
-    hasHeader: bool
+    headerBytesNeeded: int
 
     buf: Deque[uint8]
     index: array[IndexSize, Rgba]
-  UpdateCallback* = (proc (pixels: openArray[uint8]))
+  UpdateCallback* = (proc (data: seq[uint8]))
 
 func initDecode*(channels = 0): QoiDecodeContext =
-  result.buf = initDeque[uint8](HeaderSize)
   result.channels = channels.uint8
+  result.headerBytesNeeded = HeaderSize
+  result.buf = initDeque[uint8](HeaderSize)
 
 func processHeader(ctx: var QoiDecodeContext) =
   ## Process a completely read header
@@ -53,9 +57,8 @@ func processHeader(ctx: var QoiDecodeContext) =
       ctx.colorspace > 1 or
       ctx.height >= PixelsMax div ctx.width:
     raise newException(ValueError, "invalid header")
-  ctx.hasHeader = true
 
-func processChunk(ctx: var QoiDecodeContext; buf: Buf; callback: UpdateCallback) =
+func processChunk(ctx: var QoiDecodeContext; buf: Buf; outData: var seq[uint8]) =
   ## Process a completely read chunk
   var
     pos = 0
@@ -91,9 +94,9 @@ func processChunk(ctx: var QoiDecodeContext; buf: Buf; callback: UpdateCallback)
   ctx.index[colorHash(pixel) mod 64] = pixel
   for _ in 0..<count:
     if ctx.channels == 4:
-      callback(pixel)
+      outData.add(pixel)
     else:
-      callback(pixel[R..B])
+      outData.add(pixel[R..B])
 
 template addLast[T](d: Deque[T]; items: openArray[T]) =
   for item in items:
@@ -113,27 +116,32 @@ func chunkSize(b1: uint8): int =
     raise newException(ValueError, "invalid chunk")
 
 func update*(ctx: var QoiDecodeContext; data: openArray[uint8]; callback: UpdateCallback) =
-  if not ctx.hasHeader:
-    ctx.buf.addLast(data)
-    if ctx.buf.len >= HeaderSize:
+  var pos = 0
+
+  # read the header
+  if ctx.headerBytesNeeded > 0:
+    let bytesToAdd = min(ctx.headerBytesNeeded, data.len)
+    ctx.buf.addLast(data.toOpenArray(pos, pos.preInc(bytesToAdd) - 1))
+    ctx.headerBytesNeeded = HeaderSize - ctx.buf.len
+    if ctx.headerBytesNeeded == 0:
       ctx.processHeader()
-  else:
-    var pos = 0
+
+  # read chunks
+  var outData = newSeqOfCap[uint8](data.len * QoiCapacityFactor)
+  if ctx.headerBytesNeeded == 0:
     # finish the current incomplete chunk
     if ctx.buf.len != 0:
       let
         bytesNeeded = chunkSize(ctx.buf[0]) - ctx.buf.len
         bytesToAdd = min(bytesNeeded, data.len)
-      ctx.buf.addLast(data.toOpenArray(0, bytesToAdd - 1))
-      pos += bytesToAdd
+      ctx.buf.addLast(data.toOpenArray(pos, pos.preInc(bytesToAdd) - 1))
       if bytesToAdd >= bytesNeeded:
-        ctx.processChunk(ctx.buf, callback)
+        ctx.processChunk(ctx.buf, outData)
         ctx.buf.clear()
     # read complete chunks
     var size: int
     while data.len - pos >= 1 and (size = chunkSize(data[pos]); data.len - pos >= size):
-      ctx.processChunk(data.toOpenArray(pos, pos + size - 1), callback)
-      pos += size
+      ctx.processChunk(data.toOpenArray(pos, pos.preInc(size) - 1), outData)
     # buffer trailing incomplete chunk
     if pos < data.len:
       ctx.buf.addLast(data.toOpenArray(pos, data.high))

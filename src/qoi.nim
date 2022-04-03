@@ -23,8 +23,8 @@ when isMainModule:
     readSize: int
   while true:
     readSize = f.readBytes(buf, 0, BufSize)
-    decoder.update(buf.toOpenArray(0, readSize - 1)) do (pixels: openArray[uint8]):
-      debugEcho "got some pixels"
+    decoder.update(buf.toOpenArray(0, readSize - 1)) do (outData: seq[uint8]):
+      debugEcho "got ", outData.len / decoder.channels.int, " pixels"
     if readSize < BufSize:
       break
   # let pixels = decode(bytes, data.len, desc)

@@ -7,7 +7,7 @@ import ./private/common
 import std/deques
 
 const
-  QoiCapacityFactor {.intdefine.} = 4 # Somewhat arbitrarily chosen. Each chunk consists of between 1 and 5 bytes. Most chunks produce 1 pixel each, except for runs which can produce up to 64 pixels. Each pixel consists of 3 or 4 bytes. If we ignore runs, the worst case is that each chunk is 1 byte and produces 4 bytes.
+  QoiCapacityFactor {.intdefine.} = 3 # Somewhat arbitrarily chosen. Each chunk consists of between 1 and 5 bytes. Most chunks produce 1 pixel each, except for runs which can produce up to 64 pixels. Each pixel consists of 3 or 4 bytes. If we ignore runs, the worst case is that each chunk is 1 byte and produces 4 bytes.
 
 type
   Buf = Deque[uint8] or openArray[uint8]
@@ -31,14 +31,18 @@ type
     colorspace*: uint8
 
     headerBytesNeeded: int
+    processedPixelCount: int
+    expectedPixelCount: int
 
+    pixel: Pixel
     buf: Deque[uint8]
-    index: array[IndexSize, Rgba]
-  UpdateCallback* = (proc (data: seq[uint8]))
+    index: array[IndexSize, Pixel]
+  UpdateCallback* = (proc (data: seq[uint8]; bytesProcessed: int))
 
 func initDecode*(channels = 0): QoiDecodeContext =
   result.channels = channels.uint8
   result.headerBytesNeeded = HeaderSize
+  result.pixel = InitialPixel
   result.buf = initDeque[uint8](HeaderSize)
 
 func processHeader(ctx: var QoiDecodeContext) =
@@ -57,46 +61,47 @@ func processHeader(ctx: var QoiDecodeContext) =
       ctx.colorspace > 1 or
       ctx.height >= PixelsMax div ctx.width:
     raise newException(ValueError, "invalid header")
+  ctx.expectedPixelCount = ctx.width.int * ctx.height.int
 
 func processChunk(ctx: var QoiDecodeContext; buf: Buf; outData: var seq[uint8]) =
   ## Process a completely read chunk
   var
     pos = 0
     count = 1
-    pixel = InitialPixel
   let b1 = buf[0]
   if b1 == OpRgb:
-    pixel[R] = buf.read8(pos)
-    pixel[G] = buf.read8(pos)
-    pixel[B] = buf.read8(pos)
+    ctx.pixel[R] = buf.read8(pos)
+    ctx.pixel[G] = buf.read8(pos)
+    ctx.pixel[B] = buf.read8(pos)
   elif b1 == OpRgba:
-    pixel[R] = buf.read8(pos)
-    pixel[G] = buf.read8(pos)
-    pixel[B] = buf.read8(pos)
-    pixel[A] = buf.read8(pos)
+    ctx.pixel[R] = buf.read8(pos)
+    ctx.pixel[G] = buf.read8(pos)
+    ctx.pixel[B] = buf.read8(pos)
+    ctx.pixel[A] = buf.read8(pos)
   elif (b1 and Mask2) == OpIndex:
-    pixel = ctx.index[b1]
+    ctx.pixel = ctx.index[b1]
   elif (b1 and Mask2) == OpDiff:
-    pixel[R] += ((b1 shr 4) and 0x03) - 2
-    pixel[G] += ((b1 shr 2) and 0x03) - 2
-    pixel[B] += ((b1 shr 0) and 0x03) - 2
+    ctx.pixel[R] += ((b1 shr 4) and 0x03) - 2
+    ctx.pixel[G] += ((b1 shr 2) and 0x03) - 2
+    ctx.pixel[B] += ((b1 shr 0) and 0x03) - 2
   elif (b1 and Mask2) == OpLuma:
     let
       b2 = buf.read8(pos)
       vg = (b1 and 0x3f) - 32
-    pixel[R] += vg - 8 + ((b2 shr 4) and 0x0f)
-    pixel[G] += vg
-    pixel[B] += vg - 8 + ((b2 shr 0) and 0x0f)
+    ctx.pixel[R] += vg - 8 + ((b2 shr 4) and 0x0f)
+    ctx.pixel[G] += vg
+    ctx.pixel[B] += vg - 8 + ((b2 shr 0) and 0x0f)
   elif (b1 and Mask2) == OpRun:
     count += (b1 and 0x3f).int
   else:
     raise newException(ValueError, "invalid chunk")
-  ctx.index[colorHash(pixel) mod 64] = pixel
+  ctx.index[colorHash(ctx.pixel) mod 64] = ctx.pixel
   for _ in 0..<count:
     if ctx.channels == 4:
-      outData.add(pixel)
+      outData.add(ctx.pixel)
     else:
-      outData.add(pixel[R..B])
+      outData.add(ctx.pixel[R..B])
+  ctx.processedPixelCount += count
 
 template addLast[T](d: Deque[T]; items: openArray[T]) =
   for item in items:
@@ -140,10 +145,12 @@ func update*(ctx: var QoiDecodeContext; data: openArray[uint8]; callback: Update
         ctx.buf.clear()
     # read complete chunks
     var size: int
-    while data.len - pos >= 1 and (size = chunkSize(data[pos]); data.len - pos >= size):
+    while data.len - pos >= 1 and (size = chunkSize(data[pos]); data.len - pos >= size) and ctx.processedPixelCount < ctx.expectedPixelCount:
       ctx.processChunk(data.toOpenArray(pos, pos.preInc(size) - 1), outData)
     # buffer trailing incomplete chunk
-    if pos < data.len:
+    if pos < data.len and ctx.processedPixelCount < ctx.expectedPixelCount:
       ctx.buf.addLast(data.toOpenArray(pos, data.high))
+
+  # output pixel data
   if outData.len > 0:
-    callback(move(outData))
+    callback(move(outData), pos)

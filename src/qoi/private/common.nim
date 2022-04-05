@@ -4,7 +4,7 @@
 # https://opensource.org/licenses/MIT
 
 type
-  Rgba* = array[4, uint8]
+  Pixel* = array[4, uint8]
 
 const
   R* = 0
@@ -47,5 +47,5 @@ func `[]=`*[T](base: ptr T; idx: int; v: T) =
   let p = base +@ idx
   p[] = v
 
-template colorHash*(c: Rgba): uint8 =
+template colorHash*(c: Pixel): uint8 =
   c[R] * 3 + c[G] * 5 + c[B] * 7 + c[A] * 11

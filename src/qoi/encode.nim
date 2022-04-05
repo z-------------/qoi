@@ -41,7 +41,7 @@ template write8(bytes: var seq[uint8]; p: var int; v: uint8) =
 proc encode*(pixels: ptr uint8; desc: var QoiDesc; outLen: var int): seq[uint8] =
   var
     p, run: int
-    index: array[64, Rgba]
+    index: array[64, Pixel]
     pxPrev = InitialPixel
     px = pxPrev
 
